@@ -1,0 +1,15 @@
+[Unit]
+Description=Sump Pump Water Level Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment="SUMP_NOTIFY_SCRIPT=/usr/local/bin/sump_notify.sh"
+ExecStart=/usr/local/bin/sump_monitord
+ExecStartPost=/usr/bin/chmod 0666 /tmp/sump_monitor.sock
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
