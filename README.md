@@ -24,6 +24,7 @@ This project requires the latest Raspberry Pi OS (Bookworm or newer) to support 
 
 sudo apt update && sudo apt dist-upgrade -y
 sudo apt install -y git build-essential libgpiod-dev alsa-utils curl snmpd snmp
+```
 
 🚀 Installation
 1. Clone and Compile
@@ -34,6 +35,7 @@ Clone the repository and compile the daemon linking the modern GPIO library.
 git clone https://github.com/gshearer/sump_monitor
 cd sump_monitor
 gcc -Wall -s -o sump_monitord sump_monitord.c -lgpiod
+```
 
 2. System Integration
 
@@ -43,13 +45,17 @@ Deploy the binaries, audio assets, and the systemd service file into the standar
 # Create sound directory and move sound file
 sudo mkdir -p /usr/local/share/sound
 sudo mv sump_alert.wav /usr/local/share/sound/
+````
 
 # Install executables and service file
+
 1. Edit sound_notify.sh, update alsa commands with your sound device (usb speaker, headphone jack, etc)
 2. Update with yoru ntfy.sh subject or some other alerting mechanism
 
+```Bash
 sudo mv sump_monitord sump_notify.sh /usr/local/bin/
 sudo mv sump_monitor.service /etc/systemd/system/
+```
 
 3. Permissions & Security
 
@@ -60,6 +66,7 @@ sudo chown root:root /usr/local/bin/sump_notify.sh /usr/local/bin/sump_monitord 
 sudo chmod 0700 /usr/local/bin/sump_notify.sh
 sudo chmod 0500 /usr/local/bin/sump_monitord
 sudo chmod 0644 /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
+```
 
 📊 SNMP Integration
 
@@ -75,6 +82,7 @@ The daemon's Unix socket outputs two lines of data: Line 1 is the current Boolea
 
     sudo systemctl enable --now snmpd.service
     sudo systemctl enable --now sump_monitor.service
+    ```
 
     Query the OIDs from your NMS:
 
