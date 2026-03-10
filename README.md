@@ -20,7 +20,7 @@ Power & Audio
 📦 Prerequisites
 
 This project requires the latest Raspberry Pi OS (Bookworm or newer) to support the libgpiod v2 library. Ensure your system is fully patched before beginning.
-Bash
+```Bash
 
 sudo apt update && sudo apt dist-upgrade -y
 sudo apt install -y git build-essential libgpiod-dev alsa-utils curl snmpd snmp
@@ -29,7 +29,7 @@ sudo apt install -y git build-essential libgpiod-dev alsa-utils curl snmpd snmp
 1. Clone and Compile
 
 Clone the repository and compile the daemon linking the modern GPIO library.
-Bash
+```Bash
 
 git clone https://github.com/gshearer/sump_monitor
 cd sump_monitor
@@ -38,7 +38,7 @@ gcc -Wall -s -o sump_monitord sump_monitord.c -lgpiod
 2. System Integration
 
 Deploy the binaries, audio assets, and the systemd service file into the standard Linux directories.
-Bash
+```Bash
 
 # Create sound directory and move sound file
 sudo mkdir -p /usr/local/share/sound
@@ -54,7 +54,7 @@ sudo mv sump_monitor.service /etc/systemd/system/
 3. Permissions & Security
 
 Lock down the daemon and the notification script (which may contain API keys) so they are only accessible by root.
-Bash
+```Bash
 
 sudo chown root:root /usr/local/bin/sump_notify.sh /usr/local/bin/sump_monitord /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
 sudo chmod 0700 /usr/local/bin/sump_notify.sh
@@ -71,7 +71,7 @@ The daemon's Unix socket outputs two lines of data: Line 1 is the current Boolea
     extend sumpMetrics /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
 
     Restart Services:
-    Bash
+    ```Bash
 
     sudo systemctl enable --now snmpd.service
     sudo systemctl enable --now sump_monitor.service
