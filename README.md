@@ -72,26 +72,24 @@ sudo chmod 0644 /etc/systemd/system/sump_monitor.service /usr/local/share/sound/
 
 The daemon's Unix socket outputs two lines of data: Line 1 is the current Boolean state (0 or 1), and Line 2 is the cumulative transition counter.
 
-    Add the Extension to /etc/snmp/snmpd.conf:
-    ```Plaintext
-    extend sumpMetrics /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
-    ```
+   Add the Extension to /etc/snmp/snmpd.conf:
+   extend sumpMetrics /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
 
-    Restart Services:
-    ```Bash
-    sudo systemctl enable --now snmpd.service
-    sudo systemctl enable --now sump_monitor.service
-    ```
+Restart Services:
+```Bash
+sudo systemctl enable --now snmpd.service
+sudo systemctl enable --now sump_monitor.service
+```
 
-    Query the OIDs from your NMS:
+Query the OIDs from your NMS:
 
-    ```Bash
-    # Current state
-    snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".1'
+```Bash
+# Current state
+snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".1'
 
-    # Event counter
-    snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".2'
-    ```
+# Event counter
+snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".2'
+```
 
 🧪 Testing
 
