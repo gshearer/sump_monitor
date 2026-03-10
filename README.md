@@ -1,134 +1,108 @@
-# 🌊 Sump Monitor
+🌊 Sump Monitor
 
-A high-performance, bare-metal **POSIX C** daemon designed for Raspberry Pi to monitor sump pit water levels. By utilizing the modern `libgpiod` v2 API, the monitor uses hardware interrupts for a near-zero CPU footprint. When water bridges the sensor pins, the system triggers a local audible alarm and executes a customizable notification script.
+A high-performance, bare-metal POSIX C daemon designed for Raspberry Pi to monitor sump pit water levels.
 
-## 🛠 Hardware Setup
+Utilizing the modern libgpiod v2 API, the monitor uses hardware polling and a 10-second software debouncing state machine to completely eliminate false positives from water turbulence and EMI. When a confirmed water event is detected, the system triggers a local audible alarm, executes a customizable notification script with state arguments (WET or DRY), and tracks total transitions.
 
-### Wiring Diagram
+It also features a Unix domain socket for seamless integration with NMS systems (like LibreNMS or Zabbix) via Net-SNMP.
+🛠 Hardware Setup
+Wiring Diagram
+Component	Raspberry Pi Pin	GPIO Number
+Sensor Wire 1	Pin 6 (GND)	Ground
+Sensor Wire 2	Pin 11	GPIO 17
+Power & Audio
 
-| Component | Raspberry Pi Pin | GPIO Number |
-| --- | --- | --- |
-| **Sensor Wire 1** | Pin 6 (GND) | Ground |
-| **Sensor Wire 2** | Pin 11 | GPIO 17 |
+    Audio: USB-powered speaker (e.g., Adafruit Mini USB Speaker).
 
-### Power & Audio
+    Power: To ensure monitoring during severe storms, use a battery backup system.
 
-* **Audio:** USB-powered speaker (e.g., Adafruit Mini USB Speaker).
-* **Power:** To ensure monitoring during storms, it is recommended to use a battery backup system (e.g., 3000W Inverter/Charger with a 100AH LiFePO4 battery).
+(Add your images here)
+📦 Prerequisites
 
-!
+This project requires the latest Raspberry Pi OS (Bookworm or newer) to support the libgpiod v2 library. Ensure your system is fully patched before beginning.
+Bash
 
-## 📦 Prerequisites
-
-This project requires the latest **Raspberry Pi OS (Bookworm or newer)** to support the `libgpiod` v2 library. Ensure your system is fully patched before beginning.
-
-```bash
 sudo apt update && sudo apt dist-upgrade -y
 sudo apt install -y git build-essential libgpiod-dev alsa-utils curl snmpd snmp
 
-```
+🚀 Installation
+1. Clone and Compile
 
-## 🚀 Installation
+Clone the repository and compile the daemon linking the modern GPIO library.
+Bash
 
-### 1. Clone and Compile
-
-```bash
 git clone https://github.com/gshearer/sump_monitor
 cd sump_monitor
 gcc -Wall -s -o sump_monitord sump_monitord.c -lgpiod
 
-```
+2. System Integration
 
-### 2. System Integration
+Deploy the binaries, audio assets, and the systemd service file into the standard Linux directories.
+Bash
 
-Deploy the binaries, audio assets, and the systemd service file.
-
-```bash
-# Create sound directory and move assets
+# Create sound directory and move sound file
 sudo mkdir -p /usr/local/share/sound
-sudo cp assets/sound.wav /usr/local/share/sound/
+sudo mv sump_alert.wav /usr/local/share/sound/
 
 # Install executables and service file
-sudo cp sump_monitord sump_notify.sh /usr/local/bin/
-sudo cp sump_monitor.service /etc/systemd/system/
+1. Edit sound_notify.sh, update alsa commands with your sound device (usb speaker, headphone jack, etc)
+2. Update with yoru ntfy.sh subject or some other alerting mechanism
 
-```
+sudo mv sump_monitord sump_notify.sh /usr/local/bin/
+sudo mv sump_monitor.service /etc/systemd/system/
 
-### 3. Permissions & Security
+3. Permissions & Security
 
-These permissions ensure the notification script (containing API keys/passwords) and the daemon are only accessible by root.
+Lock down the daemon and the notification script (which may contain API keys) so they are only accessible by root.
+Bash
 
-```bash
-sudo chown root:root /usr/local/bin/sump_notify.sh /usr/local/bin/sump_monitord /etc/systemd/system/sump_monitor.service
+sudo chown root:root /usr/local/bin/sump_notify.sh /usr/local/bin/sump_monitord /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
 sudo chmod 0700 /usr/local/bin/sump_notify.sh
 sudo chmod 0500 /usr/local/bin/sump_monitord
-sudo chmod 0644 /etc/systemd/system/sump_monitor.service
+sudo chmod 0644 /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
 
-```
+📊 SNMP Integration
 
-## 🔔 Notification Configuration
+The daemon's Unix socket outputs two lines of data: Line 1 is the current Boolean state (0 or 1), and Line 2 is the cumulative transition counter.
 
-Edit the notification script to configure your preferred alerts. The included example supports **ntfy.sh** for push notifications and **Gmail SMTP** via `curl`.
+    Add the Extension to /etc/snmp/snmpd.conf:
+    Plaintext
 
-```bash
-sudo nano /usr/local/bin/sump_notify.sh
+    extend sumpMetrics /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
 
-```
+    Restart Services:
+    Bash
 
-*Note: If using Gmail, ensure you use a 16-character **App Password** generated from your Google Account security settings.*
+    sudo systemctl enable --now snmpd.service
+    sudo systemctl enable --now sump_monitor.service
 
-## 📊 SNMP Integration
+    Query the OIDs from your NMS:
 
-To monitor the sump status via an NMS (like LibreNMS or Zabbix), integrate the daemon's Unix socket into `snmpd`.
+        Current State: snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".1'
 
-1. **Edit the SNMP Configuration:**
-```bash
-sudo nano /etc/snmp/snmpd.conf
+        Event Counter: snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".2'
 
-```
+🧪 Testing
 
+Bridge Pin 6 and Pin 11 with a jumper wire. Hold it for 10 seconds to satisfy the software debounce.
 
-2. **Add the Extension:**
-```text
-extend sumpStatus /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
+    The local speaker will play the sound.wav alarm.
 
-```
+    The WET notification will be dispatched.
 
+    The sumpMetrics SNMP state will flip to 1, and the counter will increment.
 
-3. **Restart Services:**
-```bash
-sudo systemctl restart snmpd
-sudo systemctl enable --now sump_monitor.service
+Removing the jumper wire for 10 seconds will dispatch the DRY notification and reset the SNMP state to 0.
 
-```
+Or just unplug your sump pump and let the water rise to your sensor wires connected to the gpio pins :-)
 
+Note: I used a Raspberry Pie Model B Rev 2
 
+# Pictures
 
-## 🧪 Testing
-
-You can verify the system is active by checking the status of the socket or by simulating a water event.
-
-### Local Socket Test
-
-```bash
-echo "" | nc -U /tmp/sump_monitor.sock
-# Returns 0 (Dry) or 1 (Wet)
-
-```
-
-### Hardware Test
-
-Bridge **Pin 6** and **Pin 11** with a jumper wire or paperclip.
-
-1. The local speaker should play the `sound.wav` alarm.
-2. An email/push notification should be dispatched.
-3. The `sumpStatus` SNMP OID will flip to `1`.
-
-### Logs
-
-To view the real-time execution logs of the daemon:
-
-```bash
-journalctl -u sump_monitor.service -f
-
-```
+![RPI pins](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_pins.jpg)
+![RPI_with_case](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_with_case.jpg)
+![RPI with_sensorwire](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_with_sensorwire.jpg)
+![sump_with_sensor](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/sump_with_sensor.jpg)
+![battery](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/battery.jpg)
+![inverter_charger](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/inverter_charger.png)

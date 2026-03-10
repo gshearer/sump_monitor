@@ -4,72 +4,38 @@
 # Sump Pump Monitor - Notification Script
 # ==============================================================================
 
-# Run aplay in the background (&) so the script continues immediately
-[[ -f /usr/local/share/sound/siren.wav ]] && aplay /usr/local/share/sound/siren.wav &
-
-# old-school SMTP :-) this example uses a gmail via a google app password
-SMTPHOST="smtp.gmail.com"
-SMTPPORT="587"
-SMTPFROM="your_email@gmail.com"
-SMTPUSER="$SMTPFROM"
-SMTPPASS="your_16_char_google_app_password" 
-
-sendmail()
-{
-  if [ "$#" -ne 3 ]; then
-    echo "Usage: sendmail <to> <subject> <body>"
-    return 1
-  fi
-
-  local TO="$1"
-  local SUBJECT="$2"
-  local BODY="$3"
-
-  # Use cURL to handle the SMTP transaction natively
-  # The --upload-file - flag tells cURL to read the email payload from stdin
-  echo -e "Subject: ${SUBJECT}\n\n${BODY}" | curl --ssl-reqd \
-    --url "smtp://${SMTPHOST}:${SMTPPORT}" \
-    --user "${SMTPUSER}:${SMTPPASS}" \
-    --mail-from "${SMTPFROM}" \
-    --mail-rcpt "${TO}" \
-    --upload-file -
-}
-
 # NTFY app -- get this from apple/google stores
-NTFY_TOPIC="your_unique_sump_topic_name_here"
+# see https://ntfy.sh/
+NTFY_TOPIC="changeme"
 
-ntfy()
-{
-  curl \
-    -H "Title: SUMP PUMP ALARM" \
-    -H "Priority: urgent" \
-    -H "Tags: warning,rotating_light" \
-    -d "CRITICAL: Water detected bridging the sensor pins in the basement!" \
-    "https://ntfy.sh/${NTFY_TOPIC}"
-}
+ALERT_SOUND="/usr/local/share/sound/sump_alert.wav"
 
-# TWILIO_SID="your_account_sid_here"
-# TWILIO_AUTH="your_auth_token_here"
-# TWILIO_FROM="+1234567890"  # Your Twilio Number
-# TWILIO_TO="+0987654321"    # Your Cell Phone Number
+# Grab the state passed by the C daemon
+STATE=$1
 
-# curl -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json" \
-#   --data-urlencode "Body=CRITICAL: Sump pit water level is HIGH." \
-#   --data-urlencode "From=${TWILIO_FROM}" \
-#   --data-urlencode "To=${TWILIO_TO}" \
-#   -u "${TWILIO_SID}:${TWILIO_AUTH}"
-
-CURRENT_TIME=$(date)
-ALERT_SUBJECT="CRITICAL: Sump Water Detected"
-ALERT_BODY="The sump pump monitor detected water bridging the sensor pins at ${CURRENT_TIME}."
-
-# Call the function to send the email
-# of course you may want to send more than one email
-# perhaps to an SMS gateway service
-sendmail "destination_email@gmail.com" "$ALERT_SUBJECT" "$ALERT_BODY"
-ntfy
-
-# make this show up in journald
-echo $ALERT_BODY
+if [ "$STATE" == "WET" ]; then
+    # you may need to update the args below to reflect your alsa device
+    # use "aplay -l" to see whats available on your rpi
+    amixer -c 1 sset PCM '100%' &>/dev/null
+    aplay -D plughw:1,0 "$ALERT_SOUND" & &>/dev/null
+    disown %1
+    
+    curl \
+      -H "Title: SUMP PUMP ALARM" \
+      -H "Priority: urgent" \
+      -H "Tags: warning,rotating_light" \
+      -d "CRITICAL: Water detected bridging the sensor pins in the basement!" \
+      "https://ntfy.sh/${NTFY_TOPIC}"
+   
+elif [ "$STATE" == "DRY" ]; then
+    curl \
+      -H "Title: SUMP PUMP ALARM" \
+      -H "Tags: +1" \
+      -d "NORMAL: No water detected" \
+      "https://ntfy.sh/${NTFY_TOPIC}"
+else
+    echo "Usage: $0 [WET|DRY]"
+    exit 1
+fi
 
 exit 0
