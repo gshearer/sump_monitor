@@ -1,56 +1,89 @@
-🌊 Sump Monitor
+Sump Monitor
 
-A high-performance, bare-metal POSIX C daemon designed for Raspberry Pi to monitor sump pit water levels.
+A high-performance, bare-metal POSIX C daemon designed for Raspberry Pi to monitor sump pit water levels using an MCP3008 ADC and a resistive water level sensor over SPI.
 
-Utilizing the modern libgpiod v2 API, the monitor uses hardware polling and a 10-second software debouncing state machine to completely eliminate false positives from water turbulence and EMI. When a confirmed water event is detected, the system triggers a local audible alarm, executes a customizable notification script with state arguments (WET or DRY), and tracks total transitions.
+The daemon reads analog water levels, detects pump cycles (water rises then recedes), and triggers alarms when water remains critically high for a sustained period (indicating pump failure). When an alarm condition is confirmed, the system executes a customizable notification script with state arguments (ALARM or NORMAL) and tracks pump cycles and alert executions.
 
 It also features a Unix domain socket for seamless integration with NMS systems (like LibreNMS or Zabbix) via Net-SNMP.
-🛠 Hardware Setup
-Wiring Diagram
-Component	Raspberry Pi Pin	GPIO Number
-Sensor Wire 1	Pin 6 (GND)	Ground
-Sensor Wire 2	Pin 11	GPIO 17
-Power & Audio
 
-    Audio: USB-powered speaker (e.g., Adafruit Mini USB Speaker).
+Hardware Setup
 
-    Power: To ensure monitoring during severe storms, use a battery backup system.
+MCP3008 Wiring
 
-(Add your images here)
-📦 Prerequisites
+The MCP3008 is a 10-bit 8-channel ADC that communicates over SPI. All connections run at 3.3V.
 
-This project requires the latest Raspberry Pi OS (Bookworm or newer) to support the libgpiod v2 library. Ensure your system is fully patched before beginning.
-```Bash
-
-sudo apt update && sudo apt dist-upgrade -y
-sudo apt install -y git build-essential libgpiod-dev alsa-utils curl snmpd snmp
+```
+          MCP3008
+       +----U----+
+ CH0  1|         |16  VDD ---- Pi 3.3V (Pin 1)
+ CH1  2|         |15  VREF --- Pi 3.3V (Pin 1)
+ CH2  3|         |14  AGND --- Pi GND  (Pin 6)
+ CH3  4|         |13  CLK ---- Pi SCLK (Pin 23 / GPIO 11)
+ CH4  5|         |12  DOUT --- Pi MISO (Pin 21 / GPIO 9)
+ CH5  6|         |11  DIN ---- Pi MOSI (Pin 19 / GPIO 10)
+ CH6  7|         |10  CS ----- Pi CE0  (Pin 24 / GPIO 8)
+ CH7  8|         | 9  DGND --- Pi GND  (Pin 6)
+       +─────────+
 ```
 
-🚀 Installation
+Water Sensor Wiring
+
+| Sensor Pin | Connection |
+|---|---|
+| S (signal) | MCP3008 CH0 (pin 1) |
+| + (VCC) | Pi 3.3V (Pin 1) |
+| - (GND) | Pi GND (Pin 6) |
+
+Power & Audio
+
+- Audio: USB-powered speaker (e.g., Adafruit Mini USB Speaker).
+- Power: To ensure monitoring during severe storms, use a battery backup system.
+
+Prerequisites
+
+This project requires the latest Raspberry Pi OS (Bookworm or newer). SPI must be enabled.
+
+```Bash
+sudo apt update && sudo apt dist-upgrade -y
+sudo apt install -y git build-essential alsa-utils curl snmpd snmp snmp-mibs-downloader
+```
+
+Enable SPI via `raspi-config`:
+```Bash
+sudo raspi-config
+# Interface Options -> SPI -> Enable
+```
+
+Verify SPI is available:
+```Bash
+ls /dev/spidev0.*
+# Should show /dev/spidev0.0
+```
+
+Installation
+
 1. Clone and Compile
 
-Clone the repository and compile the daemon linking the modern GPIO library.
+Clone the repository and compile the daemon. No external libraries are required.
 ```Bash
-
 git clone https://github.com/gshearer/sump_monitor
 cd sump_monitor
-gcc -Wall -s -o sump_monitord sump_monitord.c -lgpiod
+gcc -Wall -s -o sump_monitord sump_monitord.c
 ```
 
 2. System Integration
 
 Deploy the binaries, audio assets, and the systemd service file into the standard Linux directories.
 ```Bash
-
 # Create sound directory and move sound file
 sudo mkdir -p /usr/local/share/sound
 sudo mv sump_alert.wav /usr/local/share/sound/
-````
+```
 
-# Install executables and service file
+Install executables and service file:
 
-1. Edit sound_notify.sh, update alsa commands with your sound device (usb speaker, headphone jack, etc)
-2. Update with yoru ntfy.sh subject or some other alerting mechanism
+1. Edit sump_notify.sh, update alsa commands with your sound device (usb speaker, headphone jack, etc)
+2. Update with your ntfy.sh subject or some other alerting mechanism
 
 ```Bash
 sudo mv sump_monitord sump_notify.sh /usr/local/bin/
@@ -61,22 +94,53 @@ sudo mv sump_monitor.service /etc/systemd/system/
 
 Lock down the daemon and the notification script (which may contain API keys) so they are only accessible by root.
 ```Bash
-
 sudo chown root:root /usr/local/bin/sump_notify.sh /usr/local/bin/sump_monitord /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
 sudo chmod 0700 /usr/local/bin/sump_notify.sh
 sudo chmod 0500 /usr/local/bin/sump_monitord
 sudo chmod 0644 /etc/systemd/system/sump_monitor.service /usr/local/share/sound/sump_alert.wav
 ```
 
-📊 SNMP Integration
+Configuration
 
-The daemon's Unix socket outputs two lines of data: Line 1 is the current Boolean state (0 or 1), and Line 2 is the cumulative transition counter.
+All configuration is done via environment variables set in `sump_monitor.service`. Edit the service file to customize:
 
-   Add the Extension to /etc/snmp/snmpd.conf:
-   extend sumpMetrics /usr/bin/bash -c '/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'
+| Environment Variable | Purpose | Default |
+|---|---|---|
+| `SUMP_NOTIFY_SCRIPT` | Path to notification script | `/usr/local/bin/sump_notify.sh` |
+| `SUMP_POLL_INTERVAL` | Sensor poll interval in seconds | `1` |
+| `SUMP_WATER_THRESHOLD` | ADC value above which water is considered detected | `100` |
+| `SUMP_ALARM_LEVEL` | ADC value indicating critically high water | `600` |
+| `SUMP_ALARM_DELAY` | Seconds water must remain at alarm level before notification fires | `300` |
+| `SUMP_ALERT_HOLDDOWN` | Minimum seconds between repeated alert executions | `300` |
+| `SUMP_STATE_THRESHOLD` | Consecutive polls to confirm a state change (debounce) | `3` |
 
-Restart Services:
+Note: I place the water sensor slightly deeper than when the pump kicks on. This allows the system to detect water and track how many times the pump cycles. If the water doesn't drain within SUMP_POLL_INTERVAL, the alarm is triggered.
+
+After editing, reload and restart:
 ```Bash
+sudo systemctl daemon-reload
+sudo systemctl restart sump_monitor.service
+```
+
+SNMP Integration
+
+The daemon's Unix socket outputs four lines of data:
+
+| Line | Meaning |
+|---|---|
+| 1 | Current ADC reading (0-1023) |
+| 2 | Alarm state (0 = normal, 1 = alarm) |
+| 3 | Pump cycle count |
+| 4 | Alert script execution count |
+
+Add the extension to snmpd: (you may want to adjust community name, view permissions etc)
+```Bash
+# add the extend and set cache to 1 second
+printf 'extend sumpMetrics /usr/bin/bash -c '"'"'/bin/echo "" | /usr/bin/nc -U /tmp/sump_monitor.sock'"'"'\nextendCacheTime sumpMetrics 1\n' | sudo tee /etc/snmp/snmpd.conf.d/sump_monitor.conf
+# allow those oids to be viewed
+sudo sed -i '/view   systemonly  included   .1.3.6.1.2.1.25.1/a view   systemonly  included   .1.3.6.1.4.1.8072.1.3' /etc/snmp/snmpd.conf
+# allow the snmp service to be queried externally
+sudo sed -i 's/^agentaddress.*/agentaddress udp:161/' /etc/snmp/snmpd.conf
 sudo systemctl enable --now snmpd.service
 sudo systemctl enable --now sump_monitor.service
 ```
@@ -84,34 +148,65 @@ sudo systemctl enable --now sump_monitor.service
 Query the OIDs from your NMS:
 
 ```Bash
-# Current state
+# Current ADC reading (0-1023)
 snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".1'
 
-# Event counter
+# Alarm state (0=normal, 1=alarm)
 snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".2'
+
+# Pump cycle count
+snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".3'
+
+# Alert script execution count
+snmpget -v2c -c public <IP> 'NET-SNMP-EXTEND-MIB::nsExtendOutLine."sumpMetrics".4'
 ```
 
-🧪 Testing
+Testing
 
-Bridge Pin 6 and Pin 11 with a jumper wire. Hold it for 10 seconds to satisfy the software debounce.
+GPIO Test Utility
 
-    The local speaker will play the sound.wav alarm.
+A standalone test utility (`gpio_test.c`) is included for verifying the MCP3008 and water sensor:
 
-    The WET notification will be dispatched.
+```Bash
+gcc -Wall -s -o gpio_test gpio_test.c
 
-    The sumpMetrics SNMP state will flip to 1, and the counter will increment.
+# Single reading
+sudo ./gpio_test
 
-Removing the jumper wire for 10 seconds will dispatch the DRY notification and reset the SNMP state to 0.
+# Continuous polling (1s interval, Ctrl+C to stop)
+sudo ./gpio_test -l
 
-Or just unplug your sump pump and let the water rise to your sensor wires connected to the gpio pins :-)
+# With raw SPI debug bytes
+sudo ./gpio_test -d
 
-Note: I used a Raspberry Pie Model B Rev 2
+# SPI loopback test (short MOSI pin 19 to MISO pin 21, no MCP3008)
+sudo ./gpio_test --loopback
+```
+
+Daemon Testing
+
+With the daemon running, submerge the water sensor into a cup of water covering the exposed traces on the PCB.
+
+- The ADC reading will climb above the water threshold (default 100) and the daemon will log "Water detected".
+- Removing the sensor from water will cause the reading to drop, logging "Pump cycle completed" and incrementing the cycle counter.
+- To test alarm behavior, keep the sensor submerged for longer than `SUMP_ALARM_DELAY` (default 300s). The notification script will fire with the ALARM argument.
+
+Query the socket directly to verify the 4-line output:
+```Bash
+echo "" | nc -U /tmp/sump_monitor.sock
+```
+
+Toggle debug output at runtime:
+```Bash
+sudo kill -USR1 $(pidof sump_monitord)
+```
+
+Note: Developed and tested on a Raspberry Pi Model B Rev 2
 
 # Pictures
 
-![RPI pins](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_pins.jpg)
-![RPI_with_case](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_with_case.jpg)
-![RPI with_sensorwire](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/rpi_with_sensorwire.jpg)
-![sump_with_sensor](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/sump_with_sensor.jpg)
-![battery](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/battery.jpg)
-![inverter_charger](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/inverter_charger.png)
+![Sensor_and_circuit](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/sensor_and_circuit.jpg)
+![Finished](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/finished.jpg)
+![Sump](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/sump.jpg)
+![Battery](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/battery.jpg)
+![Inverter_charger](https://raw.githubusercontent.com/gshearer/sump_monitor/refs/heads/main/pics/inverter_charger.png)
