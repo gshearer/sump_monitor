@@ -7,8 +7,9 @@ Type=simple
 User=root
 Environment="SUMP_NOTIFY_SCRIPT=/usr/local/bin/sump_notify.sh"
 Environment="SUMP_POLL_INTERVAL=1"
-Environment="SUMP_WATER_THRESHOLD=100"
-Environment="SUMP_ALARM_LEVEL=600"
+Environment="SUMP_WET_THRESHOLD=300"
+Environment="SUMP_DRY_THRESHOLD=50"
+Environment="SUMP_ADC_SAMPLES=5"
 Environment="SUMP_ALARM_DELAY=300"
 Environment="SUMP_ALERT_HOLDDOWN=300"
 Environment="SUMP_STATE_THRESHOLD=3"

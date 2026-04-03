@@ -108,9 +108,10 @@ All configuration is done via environment variables set in `sump_monitor.service
 |---|---|---|
 | `SUMP_NOTIFY_SCRIPT` | Path to notification script | `/usr/local/bin/sump_notify.sh` |
 | `SUMP_POLL_INTERVAL` | Sensor poll interval in seconds | `1` |
-| `SUMP_WATER_THRESHOLD` | ADC value above which water is considered detected | `100` |
-| `SUMP_ALARM_LEVEL` | ADC value indicating critically high water | `600` |
-| `SUMP_ALARM_DELAY` | Seconds water must remain at alarm level before notification fires | `300` |
+| `SUMP_WET_THRESHOLD` | ADC value at or above which water is considered detected | `300` |
+| `SUMP_DRY_THRESHOLD` | ADC value at or below which water is considered receded | `50` |
+| `SUMP_ADC_SAMPLES` | Number of ADC samples per poll, median filtered | `5` |
+| `SUMP_ALARM_DELAY` | Seconds water must remain in wet state before alarm triggers | `300` |
 | `SUMP_ALERT_HOLDDOWN` | Minimum seconds between repeated alert executions | `300` |
 | `SUMP_STATE_THRESHOLD` | Consecutive polls to confirm a state change (debounce) | `3` |
 

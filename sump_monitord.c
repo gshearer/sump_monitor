@@ -143,6 +143,42 @@ mcp3008_read(int32_t fd, uint32_t channel)
 }
 
 
+// cmp_int32 -- comparison function for qsort
+static int
+cmp_int32(const void *a, const void *b)
+{
+  int32_t va = *(const int32_t *)a;
+  int32_t vb = *(const int32_t *)b;
+
+  return (va > vb) - (va < vb);
+}
+
+
+// mcp3008_read_median -- take multiple ADC samples and return the median
+// returns: median ADC value (0-1023) on success, -1 on failure
+// arg fd: SPI file descriptor
+// arg channel: MCP3008 channel number (0-7)
+// arg n_samples: number of samples to take (must be >= 1)
+static int32_t
+mcp3008_read_median(int32_t fd, uint32_t channel, int32_t n_samples)
+{
+  int32_t samples[n_samples];
+
+  for(int32_t i = 0; i < n_samples; i++)
+  {
+    int32_t val = mcp3008_read(fd, channel);
+    if(val < 0)
+      return -1;
+
+    samples[i] = val;
+  }
+
+  qsort(samples, n_samples, sizeof(int32_t), cmp_int32);
+
+  return samples[n_samples / 2];
+}
+
+
 // trigger_notification -- fork/exec the notification script
 // arg state_str: "ALARM" or "NORMAL" passed as first argument to the script
 static void
@@ -252,8 +288,9 @@ main(void)
     notify_script_path = "/usr/local/bin/sump_notify.sh";
 
   const int32_t poll_interval    = env_int("SUMP_POLL_INTERVAL", 1);
-  const int32_t water_threshold  = env_int("SUMP_WATER_THRESHOLD", 100);
-  const int32_t alarm_level      = env_int("SUMP_ALARM_LEVEL", 600);
+  const int32_t wet_threshold    = env_int("SUMP_WET_THRESHOLD", 300);
+  const int32_t dry_threshold    = env_int("SUMP_DRY_THRESHOLD", 50);
+  const int32_t adc_samples      = env_int("SUMP_ADC_SAMPLES", 5);
   const int32_t alarm_delay      = env_int("SUMP_ALARM_DELAY", 300);
   const int32_t alert_holddown   = env_int("SUMP_ALERT_HOLDDOWN", 300);
   const int32_t state_threshold  = env_int("SUMP_STATE_THRESHOLD", 3);
@@ -301,9 +338,10 @@ main(void)
   fds[0].fd = server_sock;
   fds[0].events = POLLIN;
 
-  fprintf(stderr, "Daemon active. poll=%ds water_thresh=%d alarm_level=%d "
-          "alarm_delay=%ds alert_holddown=%ds state_thresh=%d Socket: %s\n",
-          poll_interval, water_threshold, alarm_level,
+  fprintf(stderr, "Daemon active. poll=%ds wet_thresh=%d dry_thresh=%d "
+          "adc_samples=%d alarm_delay=%ds alert_holddown=%ds state_thresh=%d "
+          "Socket: %s\n",
+          poll_interval, wet_threshold, dry_threshold, adc_samples,
           alarm_delay, alert_holddown, state_threshold, SOCKET_PATH);
 
   // debounce counters
@@ -362,7 +400,7 @@ main(void)
     {
       last_check_time = now;
 
-      int32_t val = mcp3008_read(spi_fd, ADC_CHANNEL);
+      int32_t val = mcp3008_read_median(spi_fd, ADC_CHANNEL, adc_samples);
       if(val < 0)
       {
         perror("ADC read failed");
@@ -381,7 +419,7 @@ main(void)
 
       // --- water detection with debounce ---
 
-      if(val >= water_threshold)
+      if(val >= wet_threshold)
       {
         consecutive_wet++;
         consecutive_dry = 0;
@@ -389,11 +427,12 @@ main(void)
         if(!water_present && consecutive_wet >= state_threshold)
         {
           water_present = true;
-          fprintf(stderr, "Water detected (ADC=%d, threshold=%d)\n",
-                  val, water_threshold);
+          high_water_since = now;
+          fprintf(stderr, "Water detected (ADC=%d, wet_threshold=%d), "
+                  "watching for %ds\n", val, wet_threshold, alarm_delay);
         }
       }
-      else
+      else if(val <= dry_threshold)
       {
         consecutive_dry++;
         consecutive_wet = 0;
@@ -422,23 +461,22 @@ main(void)
           high_water_since = 0;
         }
       }
-
-      // --- alarm detection: sustained high water ---
-
-      if(water_present && val >= alarm_level)
+      else
       {
-        if(high_water_since == 0)
-        {
-          high_water_since = now;
-          fprintf(stderr, "High water detected (ADC=%d >= %d), "
-                  "watching for %ds\n", val, alarm_level, alarm_delay);
-        }
+        // in the hysteresis band -- reset both counters, no state change
+        consecutive_wet = 0;
+        consecutive_dry = 0;
+      }
 
+      // --- alarm detection: sustained wet state ---
+
+      if(water_present && high_water_since > 0)
+      {
         if(!alarm_active && (now - high_water_since) >= alarm_delay)
         {
           alarm_active = true;
-          fprintf(stderr, "ALARM: Water at critical level for %ds! "
-                  "(ADC=%d)\n", alarm_delay, val);
+          fprintf(stderr, "ALARM: Water present for %ds! (ADC=%d)\n",
+                  alarm_delay, val);
         }
 
         if(alarm_active && (now - last_alert_time) >= alert_holddown)
@@ -448,12 +486,6 @@ main(void)
           last_alert_time = now;
           alert_exec_count++;
         }
-      }
-      else
-      {
-        // water present but below alarm level, or no water --
-        // reset the high-water timer
-        high_water_since = 0;
       }
     }
   }
